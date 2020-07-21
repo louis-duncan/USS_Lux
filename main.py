@@ -1,4 +1,4 @@
-from gpiozero import LED, PWMLED
+from gpiozero import LED, PWMLED, Servo
 from time import sleep
 from random import randint
 from threading import Thread
@@ -132,6 +132,9 @@ class ShipController:
             "top_lights_3": LED(15)
         }
 
+        self.nacelles_servo = Servo(21)
+        self.nacelles_servo.min()
+
     @property
     def cabins_mode(self):
         return self.__cabins_mode
@@ -205,6 +208,76 @@ class ShipController:
             self.lights["dynamic_nacelles"].off()
             self.lights["dynamic_nacelles"].on()
 
+    def process_command(self, command):
+        commands = []
+        if type(command) is str:
+            commands = command.split(" ")
+        elif type(command) in (tuple, list):
+            commands = command
+        else:
+            raise TypeError("Invalid command type <{}>".format(type(command)))
+
+        while len(commands) < 3:
+            commands.append("")
+        if commands[0] == "cabins":
+            if commands[1] == "on":
+                self.cabins_on()
+                print("<System> Cabins on.")
+            elif commands[1] == "off":
+                self.cabins_off()
+                print("<System> Cabins off.")
+            elif commands[1] == "random":
+                if commands[2] == "on":
+                    self.set_cabins_mode("random")
+                    print("<System> Cabins mode set to random.")
+                elif commands[2] == "off":
+                    self.set_cabins_mode("static")
+                    print("<System> Cabins mode set to static.")
+        elif commands[0] in ("engines", "nacelles"):
+            if commands[1] == "on":
+                self.nacelles_on()
+                print("<System> Nacelles on.")
+            elif commands[1] == "off":
+                self.nacelles_off()
+                print("<System> Nacelles off.")
+            elif commands[1] == "pulse":
+                if commands[2] == "on":
+                    self.set_nacelles_mode("pulse")
+                    print("<System> Nacelles mode set to pulse.")
+                elif commands[2] == "off":
+                    self.set_nacelles_mode("static")
+                    print("<System> Nacelles mode set to static.")
+            elif commands[1] == "up":
+                self.nacelles_servo.max()
+                print("<System> Nacelles up.")
+            elif commands[1] == "down":
+                self.nacelles_servo.min()
+                print("<System> Nacelles down.")
+        elif commands[0] == "blinkers":
+            if commands[1] == "on":
+                self.blinkers_on()
+                print("<System> Blinkers on.")
+            elif commands[1] == "off":
+                self.blinkers_off()
+                print("<System> Blinkers off.")
+        elif commands[0] == "all":
+            if commands[1] == "on":
+                self.cabins_on()
+                self.nacelles_on()
+                self.blinkers_on()
+                print("<System> All on.")
+            elif commands[1] == "off":
+                self.cabins_off()
+                self.nacelles_off()
+                self.blinkers_off()
+                print("<System> All off.")
+        elif commands[0] in ("stop", "exit", "halt"):
+            self.cabins_off()
+            self.nacelles_off()
+            self.blinkers_off()
+            print("<System> Stopping...")
+            exit(0)
+
 
 def run():
     controller = ShipController()
@@ -214,44 +287,8 @@ def run():
     controller.blinkers_on()
 
     while True:
-        commands = input("}}} ").split(" ")
-        while len(commands) < 3:
-            commands.append("")
-        if commands[0] == "cabins":
-            if commands[1] == "on":
-                controller.cabins_on()
-            elif commands[1] == "off":
-                controller.cabins_off()
-        elif commands[0] in ("engines", "nacelles"):
-            if commands[1] == "on":
-                controller.nacelles_on()
-            elif commands[1] == "off":
-                controller.nacelles_off()
-            elif commands[1] == "pulse":
-                if commands[2] == "on":
-                    controller.set_nacelles_mode("pulse")
-                elif commands[2] == "off":
-                    controller.set_nacelles_mode("static")
-
-        elif commands[0] == "blinkers":
-            if commands[1] == "on":
-                controller.blinkers_on()
-            elif commands[1] == "off":
-                controller.blinkers_off()
-        elif commands[0] == "all":
-            if commands[1] == "on":
-                controller.cabins_on()
-                controller.nacelles_on()
-                controller.blinkers_on()
-            elif commands[1] == "off":
-                controller.cabins_off()
-                controller.nacelles_off()
-                controller.blinkers_off()
-        elif commands[0] in ("stop", "exit", "halt"):
-            controller.cabins_off()
-            controller.nacelles_off()
-            controller.blinkers_off()
-            exit(0)
+        command = input("}}} ")
+        controller.process_command(command)
 
 
 def test(pins):
@@ -276,5 +313,6 @@ def chip_test():
     chip2 = [12, 16, 20, 21, 26, 19, 13, 6]
     chip3 = [9, 10, 22, 27, 17, 4, 3, 2]
     test(chip3)
+
 
 run()
