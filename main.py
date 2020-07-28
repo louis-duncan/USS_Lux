@@ -89,7 +89,7 @@ class CustomPWMLED(PWMLED):
             if increasing:
                 v += step_up_size
                 if v >= upper_limit:
-                    self.value = 1
+                    self.value = upper_limit
                     increasing = False
                 else:
                     self.value = v
@@ -124,12 +124,12 @@ class ShipController:
                 ]
             ),
             "dynamic_nacelles": CustomPWMLED(14),
-            "static_nacelles": LED(8),
+            "static_nacelles": LED(15),
             "port_lights": LED(25),
             "starboard_lights": LED(24),
             "top_lights_1": LED(23),
             "top_lights_2": LED(18),
-            "top_lights_3": LED(15)
+            "top_lights_3": LED(19)
         }
 
     @property
@@ -157,7 +157,7 @@ class ShipController:
         if self.__nacelles_mode == "static":
             self.lights["dynamic_nacelles"].on()
         elif self.__nacelles_mode == "pulse":
-            self.lights["dynamic_nacelles"].custom_pulse(0.3, 0.9, 0.6, 1)
+            self.lights["dynamic_nacelles"].custom_pulse(0.3, 0.9, 0.2, 0.3)
 
     def nacelles_off(self):
         self.lights["static_nacelles"].off()
