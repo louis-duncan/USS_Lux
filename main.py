@@ -1,7 +1,13 @@
-from gpiozero import LED, PWMLED
+import json
+import socket
+import sys
+from gpiozero import LED, PWMLED, Servo
 from time import sleep
 from random import randint
 from threading import Thread
+
+
+RUN = True
 
 
 class DynamicLights:
@@ -132,6 +138,15 @@ class ShipController:
             "top_lights_3": LED(19)
         }
 
+        self.receiver_socket = socket.socket()
+        self.connected = False
+        self.current_connection = None
+        self.run = True
+        self.network_thread = Thread(
+            target=self.network_control
+        )
+        self.network_thread.start()
+
     @property
     def cabins_mode(self):
         return self.__cabins_mode
@@ -202,62 +217,142 @@ class ShipController:
         assert mode in ("static", "random")
         self.__cabins_mode = mode
         if self.lights["dynamic_cabins"].is_active:
-            self.lights["dynamic_nacelles"].off()
-            self.lights["dynamic_nacelles"].on()
+            self.lights["dynamic_cabins"].off()
+            self.lights["dynamic_cabins"].on()
 
+    def process_command(self, command):
+        global RUN
+        commands = []
+        if type(command) is str:
+            commands = command.split(" ")
+        elif type(command) in (tuple, list):
+            commands = command
+        else:
+            raise TypeError("Invalid command type <{}>".format(type(command)))
 
-def run():
-    controller = ShipController()
-
-    controller.nacelles_on()
-    controller.cabins_on()
-    controller.blinkers_on()
-
-    while True:
-        commands = input("}}} ").split(" ")
         while len(commands) < 3:
             commands.append("")
         if commands[0] == "cabins":
             if commands[1] == "on":
-                controller.cabins_on()
+                self.cabins_on()
+                print("<System> Cabins on.")
             elif commands[1] == "off":
-                controller.cabins_off()
+                self.cabins_off()
+                print("<System> Cabins off.")
+            elif commands[1] == "random":
+                if commands[2] == "on":
+                    self.set_cabins_mode("random")
+                    print("<System> Cabins mode set to random.")
+                elif commands[2] == "off":
+                    self.set_cabins_mode("static")
+                    print("<System> Cabins mode set to static.")
         elif commands[0] in ("engines", "nacelles"):
             if commands[1] == "on":
-                controller.nacelles_on()
+                self.nacelles_on()
+                print("<System> Nacelles on.")
             elif commands[1] == "off":
-                controller.nacelles_off()
+                self.nacelles_off()
+                print("<System> Nacelles off.")
             elif commands[1] == "pulse":
                 if commands[2] == "on":
-                    controller.set_nacelles_mode("pulse")
+                    self.set_nacelles_mode("pulse")
+                    print("<System> Nacelles mode set to pulse.")
                 elif commands[2] == "off":
-                    controller.set_nacelles_mode("static")
-
+                    self.set_nacelles_mode("static")
+                    print("<System> Nacelles mode set to static.")
         elif commands[0] == "blinkers":
             if commands[1] == "on":
-                controller.blinkers_on()
+                self.blinkers_on()
+                print("<System> Blinkers on.")
             elif commands[1] == "off":
-                controller.blinkers_off()
+                self.blinkers_off()
+                print("<System> Blinkers off.")
         elif commands[0] == "all":
             if commands[1] == "on":
-                controller.cabins_on()
-                controller.nacelles_on()
-                controller.blinkers_on()
+                self.cabins_on()
+                self.nacelles_on()
+                self.blinkers_on()
+                print("<System> All on.")
             elif commands[1] == "off":
-                controller.cabins_off()
-                controller.nacelles_off()
-                controller.blinkers_off()
+                self.cabins_off()
+                self.nacelles_off()
+                self.blinkers_off()
+                print("<System> All off.")
         elif commands[0] in ("stop", "exit", "halt"):
-            controller.cabins_off()
-            controller.nacelles_off()
-            controller.blinkers_off()
-            exit(0)
+            self.cabins_off()
+            self.nacelles_off()
+            self.blinkers_off()
+            print("<System> Stopping...")
+            RUN = False
+            self.run = False
+            self.receiver_socket.close()
+            if not self.connected:
+                s = socket.create_connection(("localhost", 3141))
+                s.close()
+            sys.exit(0)
+        elif commands[0] == "get_state":
+            print("<System> Getting state.")
+            return self.get_state()
+
+    def get_state(self):
+        data = {
+            "cabins": self.lights["static_cabins"].is_lit,
+            "cabins_mode": self.__cabins_mode,
+            "nacelles": self.lights["static_nacelles"].is_lit,
+            "nacelles_mode": self.__nacelles_mode,
+
+        }
+        return data
+
+    def network_control(self):
+        self.receiver_socket.bind(("0.0.0.0", 3141))
+        self.receiver_socket.listen(1)
+        while self.run:
+            self.connected = False
+            self.current_connection,  addr = self.receiver_socket.accept()
+            self.connected = True
+            data = b""
+            while self.run:
+                try:
+                    rb = self.current_connection.recv(1)
+                except (ConnectionError, OSError):
+                    break
+
+                if rb == b"":
+                    try:
+                        self.current_connection.close()
+                    except (ConnectionError, OSError):
+                        pass
+                    break
+                elif rb == b"\n":
+                    command = data.decode()
+                    try:
+                        command = json.loads(command)
+                        resp = controller.process_command(command)
+                        self.current_connection.send(
+                            json.dumps(resp).encode()
+                        )
+                        data = b""
+                    except json.JSONDecodeError:
+                        print("<System> JSONDecodeError: Bad data received.")
+                else:
+                    data += rb
+
+
+def run_cl():
+    controller.nacelles_on()
+    controller.cabins_on()
+    controller.blinkers_on()
+
+    while RUN:
+        command = input("}}} ")
+        controller.process_command(command)
 
 
 def test(pins):
     lights = [PWMLED(n) for n in pins]
-    for l in lights:
-        l.off()
+    for light in lights:
+        light.off()
     lights[0].on()
     pos = 0
     print(0)
@@ -277,4 +372,6 @@ def chip_test():
     chip3 = [9, 10, 22, 27, 17, 4, 3, 2]
     test(chip3)
 
-run()
+
+controller = ShipController()
+run_cl()
