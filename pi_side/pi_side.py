@@ -1,7 +1,7 @@
 import json
 import socket
 import sys
-from gpiozero import LED, PWMLED, Servo
+from gpiozero import LED, PWMLED
 from time import sleep
 from random import randint
 from threading import Thread
