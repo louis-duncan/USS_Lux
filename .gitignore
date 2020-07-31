@@ -4,3 +4,13 @@ pi_side/.idea/
 controller/.idea/
 
 controller/venv/
+
+controller/build/
+
+controller/controller.spec
+
+controller/__pycache__/
+
+controller/build.bat
+
+controller/USS Lux.spec
