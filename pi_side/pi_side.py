@@ -6,12 +6,19 @@ from time import sleep
 from random import randint
 from threading import Thread
 
+DEBUG_DISPLAY = True
+
+if DEBUG_DISPLAY:
+    from RPi_GPIO_i2c_LCD import lcd
+    LCD_ADDR = 0x27
+    DISPLAY = lcd.HD44780(LCD_ADDR)
 
 RUN = True
 
 
 class DynamicLights:
-    def __init__(self, lights, mode="random"):
+    def __init__(self, lights, mode="random", parent=None):
+        self.parent = parent
         self.lights = lights
         self.is_active = False
         self.run_thread = None
@@ -40,8 +47,10 @@ class DynamicLights:
     def __run(self):
         while self.__keep_running:
             if self.is_active:
-                while self.is_active:
+                while self.is_active and self.__keep_running:
                     self.lights[randint(0, len(self.lights) - 1)].toggle()
+                    if self.parent is not None:
+                        self.parent.update_screen()
                     sleep(randint(0, 50) / 10)
             else:
                 sleep(1)
@@ -56,8 +65,8 @@ class DynamicLights:
     def set_static(self):
         self.__mode = "static"
         self.__keep_running = False
-        sleep(1.2)
-        self.on()
+        if self.is_lit:
+            self.on()
 
     @property
     def mode(self):
@@ -114,38 +123,64 @@ class CustomPWMLED(PWMLED):
 
 
 class ShipController:
-    def __init__(self):
+    def __init__(self, start_thread=False):
+        """If start_thread is False, "network_control" will need to be called."""
         self.__cabins_mode = "random"  # "static" / "random"
         self.__nacelles_mode = "pulse"  # "static" / "pulse"
 
+        dynamic_cabin_pins = (
+                                 12,
+                                 16,
+                                 20,
+                                 21,
+                                 26,
+                                 19,
+                                 13,
+                                 6,
+                                 5,
+                                 11,
+                                 9,
+                                 10,
+                                 22,
+                                 27,
+                                 17,
+                                 4,
+        )
+
         self.lights = {
-            "static_cabins": LED(11),
+            "static_nacelles": LED(14),
+            "dynamic_nacelles": CustomPWMLED(15),
+            "port_lights": LED(18),
+            "starboard_lights": LED(23),
+            "top_lights_1": LED(24),
+            "top_lights_2": LED(25),
+            "top_lights_3": LED(8),
+            "static_cabins": LED(7),
             "dynamic_cabins": DynamicLights(
                 [
-                    LED(9),
-                    LED(10),
-                    LED(22),
-                    LED(27),
-                    LED(17)
-                ]
+                    LED(n) for n in dynamic_cabin_pins
+                ],
+                parent=self
             ),
-            "dynamic_nacelles": CustomPWMLED(14),
-            "static_nacelles": LED(15),
-            "port_lights": LED(25),
-            "starboard_lights": LED(24),
-            "top_lights_1": LED(23),
-            "top_lights_2": LED(18),
-            "top_lights_3": LED(19)
         }
-
+        self.blinkers_lit = False
         self.receiver_socket = socket.socket()
         self.connected = False
         self.current_connection = None
         self.run = True
-        self.network_thread = Thread(
-            target=self.network_control
-        )
-        self.network_thread.start()
+
+        if start_thread:
+            self.network_thread = Thread(
+                target=self.network_control
+            )
+            self.network_thread.daemon = True
+            self.network_thread.start()
+
+        self.nacelles_on()
+        self.cabins_on()
+        self.blinkers_on()
+
+        self.update_screen()
 
     @property
     def cabins_mode(self):
@@ -190,6 +225,7 @@ class ShipController:
         self.lights["top_lights_3"].blink(0.1, 2)
         sleep(0.1)
         self.lights["top_lights_2"].blink(0.1, 2)
+        self.blinkers_lit = True
 
     def blinkers_off(self):
         self.lights["port_lights"].off()
@@ -197,6 +233,7 @@ class ShipController:
         self.lights["top_lights_1"].off()
         self.lights["top_lights_2"].off()
         self.lights["top_lights_3"].off()
+        self.blinkers_lit = False
 
     def set_nacelles_mode(self, mode):
         """
@@ -216,22 +253,25 @@ class ShipController:
         """
         assert mode in ("static", "random")
         self.__cabins_mode = mode
-        if self.lights["dynamic_cabins"].is_active:
-            self.lights["dynamic_cabins"].off()
-            self.lights["dynamic_cabins"].on()
+        if mode == "static":
+            self.lights["dynamic_cabins"].set_static()
+        else:
+            self.lights["dynamic_cabins"].set_random()
 
     def process_command(self, command):
         global RUN
-        commands = []
         if type(command) is str:
             commands = command.split(" ")
         elif type(command) in (tuple, list):
             commands = command
+            if [type(c) for c in commands].count(str) != len(commands):
+                raise TypeError("List of commands was not all strings.")
         else:
             raise TypeError("Invalid command type <{}>".format(type(command)))
 
         while len(commands) < 3:
             commands.append("")
+
         if commands[0] == "cabins":
             if commands[1] == "on":
                 self.cabins_on()
@@ -239,11 +279,11 @@ class ShipController:
             elif commands[1] == "off":
                 self.cabins_off()
                 print("<System> Cabins off.")
-            elif commands[1] == "random":
-                if commands[2] == "on":
+            elif commands[1] in ("random", "mode"):
+                if commands[2] in ("on", "random"):
                     self.set_cabins_mode("random")
                     print("<System> Cabins mode set to random.")
-                elif commands[2] == "off":
+                elif commands[2] in ("off", "static"):
                     self.set_cabins_mode("static")
                     print("<System> Cabins mode set to static.")
         elif commands[0] in ("engines", "nacelles"):
@@ -253,11 +293,11 @@ class ShipController:
             elif commands[1] == "off":
                 self.nacelles_off()
                 print("<System> Nacelles off.")
-            elif commands[1] == "pulse":
-                if commands[2] == "on":
+            elif commands[1] in ("pulse", "mode"):
+                if commands[2] in ("on", "pulse"):
                     self.set_nacelles_mode("pulse")
                     print("<System> Nacelles mode set to pulse.")
-                elif commands[2] == "off":
+                elif commands[2] in ("off", "static"):
                     self.set_nacelles_mode("static")
                     print("<System> Nacelles mode set to static.")
         elif commands[0] == "blinkers":
@@ -286,31 +326,39 @@ class ShipController:
             RUN = False
             self.run = False
             self.receiver_socket.close()
-            if not self.connected:
-                s = socket.create_connection(("localhost", 3141))
-                s.close()
-            sys.exit(0)
+            self.run = False
+            RUN = False
+            Thread(target=self.stop).start()
         elif commands[0] == "get_state":
-            print("<System> Getting state.")
+            #print("<System> Getting state.")
             return self.get_state()
+        self.update_screen()
+
+    def stop(self):
+        sleep(1)
+        exit(0)
 
     def get_state(self):
         data = {
             "cabins": self.lights["static_cabins"].is_lit,
             "cabins_mode": self.__cabins_mode,
+            "cabin_lights": "".join(["1" if led.is_lit else "0" for led in self.lights["dynamic_cabins"].lights]),
             "nacelles": self.lights["static_nacelles"].is_lit,
             "nacelles_mode": self.__nacelles_mode,
-
+            "blinkers": self.blinkers_lit
         }
         return data
 
     def network_control(self):
         self.receiver_socket.bind(("0.0.0.0", 3141))
         self.receiver_socket.listen(1)
+        print("<System> Socket open and listening.")
+        self.connected = False
         while self.run:
-            self.connected = False
-            self.current_connection,  addr = self.receiver_socket.accept()
+            self.current_connection, addr = self.receiver_socket.accept()
             self.connected = True
+            print(f"<System> Client connected from {addr}.")
+            self.update_screen()
             data = b""
             while self.run:
                 try:
@@ -337,13 +385,38 @@ class ShipController:
                         print("<System> JSONDecodeError: Bad data received.")
                 else:
                     data += rb
+            self.connected = False
+            print(f"<System> Client {addr} disconnected.")
+            self.update_screen()
+
+    def update_screen(self):
+        if not DEBUG_DISPLAY:
+            return
+        state = self.get_state()
+        on = "ON "
+        off = "OFF"
+        lines = [
+            "Nacelles:{} Mode:{}".format(
+                on if state["nacelles"] else off,
+                "Pu" if state["nacelles_mode"] == "pulse" else "St"
+            ),
+            "Blinkers:{}        ".format(
+                on if state["blinkers"] else off
+            ),
+            "Cabins:{} Mode:{}".format(
+                on if state["cabins"] else off,
+                "Rand" if state["cabins_mode"] == "random" else "Stat"
+            ),
+            "{}{}".format(
+                "".join(["*" if led.is_lit else "O" for led in self.lights["dynamic_cabins"].lights]).ljust(19),
+                "C" if self.connected else " "
+            )
+        ]
+        for i, line in enumerate(lines):
+            DISPLAY.set(line, i + 1)
 
 
 def run_cl():
-    controller.nacelles_on()
-    controller.cabins_on()
-    controller.blinkers_on()
-
     while RUN:
         command = input("}}} ")
         controller.process_command(command)
@@ -363,7 +436,7 @@ def test(pins):
             pos = 0
         print(pos)
         lights[pos].toggle()
-        lights[pos-1].toggle()
+        lights[pos - 1].toggle()
 
 
 def chip_test():
@@ -374,4 +447,4 @@ def chip_test():
 
 
 controller = ShipController()
-run_cl()
+controller.network_control()
