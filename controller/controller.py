@@ -5,19 +5,15 @@ import wx
 import socket
 
 
-DEFAULT_SHIP_ADDR = "pipin.local"
+DEFAULT_SHIP_ADDR = "USS-Lux.local"
 DEFAULT_SHIP_PORT = 3141
 
 ID_CONNECT = 10001
-
-
-class ShipState:
-    def __init__(self):
-        self.cabins = True
-        self.dynamic_cabins = True
-        self.nacelles = True
-        self.nacelles_pulse = True
-        self.blinkers = True
+ID_CABINS = 10002
+ID_CABINS_MODE = 10003
+ID_NACELLES = 10004
+ID_NACELLES_MODE = 10005
+ID_BLINKERS = 10006
 
 
 class ControlPanel(wx.Panel):
@@ -26,84 +22,60 @@ class ControlPanel(wx.Panel):
 
         main_sizer = wx.GridBagSizer(5, 5)
 
-        self.cabins = wx.CheckBox(self)
-        self.dynamic_cabins = wx.CheckBox(self)
+        self.cabins = wx.CheckBox(self, id=ID_CABINS, label="Cabins")
+        self.cabins_mode = wx.RadioBox(self, id=ID_CABINS_MODE, choices=("Random", "Static"))
 
-        self.nacelles = wx.CheckBox(self)
-        self.nacelles_pulse = wx.CheckBox(self)
+        self.nacelles = wx.CheckBox(self, id=ID_NACELLES, label="Nacelles")
+        self.nacelles_mode = wx.RadioBox(self, id=ID_NACELLES_MODE, choices=("Pulse", "Static"))
 
-        self.blinkers = wx.CheckBox(self)
+        self.blinkers = wx.CheckBox(self, id=ID_BLINKERS, label="Blinkers")
 
-        main_sizer.Add(
-            wx.StaticText(self, label="Cabins:"),
-            pos=(0, 0),
-            flag=wx.ALIGN_CENTER_VERTICAL | wx.ALIGN_RIGHT
-        )
         main_sizer.Add(
             self.cabins,
-            pos=(0, 1),
-            flag=wx.ALIGN_CENTER_VERTICAL | wx.ALIGN_LEFT
-        )
-
-        main_sizer.Add(
-            wx.StaticText(self, label="Cabins Mode:"),
-            pos=(1, 0),
-            flag=wx.ALIGN_CENTER_VERTICAL | wx.ALIGN_RIGHT
+            pos=(0, 0)
         )
         main_sizer.Add(
-            self.dynamic_cabins,
-            pos=(1, 1),
-            flag=wx.ALIGN_CENTER_VERTICAL | wx.ALIGN_LEFT
-        )
-
-        main_sizer.Add(
-            width=0,
-            height=0,
-            pos=(2, 0)
-        )
-
-        main_sizer.Add(
-            wx.StaticText(self, label="Nacelles:"),
-            pos=(3, 0),
-            flag=wx.ALIGN_CENTER_VERTICAL | wx.ALIGN_RIGHT
+            self.cabins_mode,
+            pos=(1, 0)
         )
         main_sizer.Add(
             self.nacelles,
-            pos=(3, 1),
-            flag=wx.ALIGN_CENTER_VERTICAL | wx.ALIGN_LEFT
-        )
-
-        main_sizer.Add(
-            wx.StaticText(self, label="Nacelles Pulse:"),
-            pos=(4, 0),
-            flag=wx.ALIGN_CENTER_VERTICAL | wx.ALIGN_RIGHT
+            pos=(0, 2)
         )
         main_sizer.Add(
-            self.nacelles_pulse,
-            pos=(4, 1),
-            flag=wx.ALIGN_CENTER_VERTICAL | wx.ALIGN_LEFT
-        )
-
-        main_sizer.Add(
-            width=0,
-            height=0,
-            pos=(5, 0)
-        )
-
-        main_sizer.Add(
-            wx.StaticText(self, label="Blinkers:"),
-            pos=(6, 0),
-            flag=wx.ALIGN_CENTER_VERTICAL | wx.ALIGN_RIGHT
+            self.nacelles_mode,
+            pos=(1, 2)
         )
         main_sizer.Add(
             self.blinkers,
-            pos=(6, 1),
-            flag=wx.ALIGN_CENTER_VERTICAL | wx.ALIGN_LEFT
+            pos=(0, 4)
         )
 
-        main_sizer.AddGrowableCol(0, 1)
-        main_sizer.AddGrowableCol(1, 1)
+        main_sizer.AddGrowableCol(1)
+        main_sizer.AddGrowableCol(3)
         self.SetSizer(main_sizer)
+
+    def set_state(self, state):
+        if type(state) is not dict:
+            raise TypeError("Non-dict state given.")
+        self.cabins.SetValue(state["cabins"])
+        self.cabins_mode.SetSelection(
+            [self.cabins_mode.GetItemLabel(i).lower() for i in range(self.cabins_mode.GetCount())].index(state["cabins_mode"])
+        )
+        self.nacelles.SetValue(state["nacelles"])
+        self.nacelles_mode.SetSelection(
+            [self.nacelles_mode.GetItemLabel(i).lower() for i in range(self.nacelles_mode.GetCount())].index(
+                state["nacelles_mode"])
+        )
+        self.blinkers.SetValue(state["blinkers"])
+
+    def Enable(self, enable=True):
+        super(ControlPanel, self).Enable(enable)
+        self.cabins_mode.Enable(enable)
+        self.nacelles_mode.Enable(enable)
+
+    def Disable(self):
+        self.Enable(False)
 
 
 class Controller(wx.App):
@@ -209,6 +181,8 @@ class Controller(wx.App):
         self.main_frame.SetSizerAndFit(main_sizer)
 
         self.Bind(wx.EVT_BUTTON, self.open_connection, id=ID_CONNECT)
+        self.Bind(wx.EVT_CHECKBOX, self.state_change)
+        self.Bind(wx.EVT_RADIOBOX, self.mode_change)
 
         self.main_frame.Show()
 
@@ -221,6 +195,7 @@ class Controller(wx.App):
                 self.connection_label.SetLabel("Connected")
                 self.connection_label.SetForegroundColour((0, 255, 0))
                 self.control_panel.Enable()
+                self.refresh_state()
             except ConnectionRefusedError:
                 self.connection_label.SetLabel("Host Refused Connection")
                 self.connection_label.SetForegroundColour((255, 0, 0))
@@ -245,6 +220,25 @@ class Controller(wx.App):
 
     def refresh_state(self, e=None):
         data = self.send_command("get_state")
+        self.control_panel.set_state(data)
+
+    def state_change(self, e: wx.Event):
+        e_obj: wx.CheckBox = e.GetEventObject()
+        command = f"{e_obj.GetLabel().lower()} {'on' if e_obj.GetValue() else 'off'}"
+        print(command)
+        resp = self.send_command(command)
+
+    def mode_change(self, e: wx.Event):
+        e_obj: wx.RadioBox = e.GetEventObject()
+        if e_obj.GetId() == ID_CABINS_MODE:
+            target = "cabins"
+        elif e_obj.GetId() == ID_NACELLES_MODE:
+            target = "nacelles"
+        else:
+            return
+        command = f"{target} mode {e_obj.GetItemLabel(e_obj.GetSelection()).lower()}"
+        print(command)
+        resp = self.send_command(command)
 
 
 
