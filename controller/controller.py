@@ -1,7 +1,9 @@
+import json
 import time
 
 import wx
 import socket
+
 
 DEFAULT_SHIP_ADDR = "pipin.local"
 DEFAULT_SHIP_PORT = 3141
@@ -226,6 +228,24 @@ class Controller(wx.App):
                 self.connection_label.SetLabel("Could Not Resolve Host")
                 self.connection_label.SetForegroundColour((255, 0, 0))
             self.main_frame.Layout()
+
+    def send_command(self, command):
+        if self.connected is False:
+            return
+        data = json.dumps(command).encode() + b"\n"
+        try:
+            self.socket.send(data)
+            resp = self.socket.recv(512)
+            resp = json.loads(resp.decode())
+            return resp
+        except (ConnectionError, OSError):
+            self.connected = False
+            self.control_panel.Disable()
+            self.open_connection()
+
+    def refresh_state(self, e=None):
+        data = self.send_command("get_state")
+
 
 
 if __name__ == '__main__':
