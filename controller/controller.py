@@ -1,6 +1,5 @@
 import json
 import time
-
 import wx
 import socket
 
@@ -51,6 +50,28 @@ class ControlPanel(wx.Panel):
             pos=(0, 4)
         )
 
+        self.indicators = [
+            wx.Panel(
+                parent=self,
+                size=(15, 30),
+                style=wx.BORDER_RAISED
+            ) for i in range(18)
+        ]
+        indicators_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        for i in self.indicators:
+            i.SetBackgroundColour((200, 200, 200))
+            indicators_sizer.Add(
+                i,
+                1,
+                wx.EXPAND
+            )
+        main_sizer.Add(
+            indicators_sizer,
+            pos=(3, 0),
+            span=(1, 5),
+            flag=wx.EXPAND
+        )
+
         main_sizer.AddGrowableCol(1)
         main_sizer.AddGrowableCol(3)
         self.SetSizer(main_sizer)
@@ -68,6 +89,16 @@ class ControlPanel(wx.Panel):
                 state["nacelles_mode"])
         )
         self.blinkers.SetValue(state["blinkers"])
+        cabin_states = [c == "1" for c in state["cabin_lights"]]
+        for i in range(len(self.indicators)):
+            if i >= len(cabin_states):
+                self.indicators[i].SetBackgroundColour((0, 0, 0))
+            else:
+                if cabin_states[i]:
+                    self.indicators[i].SetBackgroundColour((0, 255, 0))
+                else:
+                    self.indicators[i].SetBackgroundColour((200, 200, 200))
+            self.indicators[i].Refresh()
 
     def Enable(self, enable=True):
         super(ControlPanel, self).Enable(enable)
@@ -136,12 +167,13 @@ class Controller(wx.App):
             wx.EXPAND | wx.RIGHT,
             5
         )
-        connection_sizer.Add(
-            wx.Button(
+        self.connect_button = wx.Button(
                 parent=self.main_frame,
                 id=ID_CONNECT,
                 label="Connect"
-            ),
+        )
+        connection_sizer.Add(
+            self.connect_button,
             0,
             wx.EXPAND
         )
@@ -180,9 +212,12 @@ class Controller(wx.App):
 
         self.main_frame.SetSizerAndFit(main_sizer)
 
+        self.update_timer = wx.Timer(self)
+
         self.Bind(wx.EVT_BUTTON, self.open_connection, id=ID_CONNECT)
         self.Bind(wx.EVT_CHECKBOX, self.state_change)
         self.Bind(wx.EVT_RADIOBOX, self.mode_change)
+        self.Bind(wx.EVT_TIMER, self.refresh_state)
 
         self.main_frame.Show()
 
@@ -196,6 +231,10 @@ class Controller(wx.App):
                 self.connection_label.SetForegroundColour((0, 255, 0))
                 self.control_panel.Enable()
                 self.refresh_state()
+                self.host_box.Disable()
+                self.port_box.Disable()
+                self.connect_button.Disable()
+                self.update_timer.Start(200)
             except ConnectionRefusedError:
                 self.connection_label.SetLabel("Host Refused Connection")
                 self.connection_label.SetForegroundColour((255, 0, 0))
@@ -214,9 +253,7 @@ class Controller(wx.App):
             resp = json.loads(resp.decode())
             return resp
         except (ConnectionError, OSError):
-            self.connected = False
-            self.control_panel.Disable()
-            self.open_connection()
+            self.on_connection_fail()
 
     def refresh_state(self, e=None):
         data = self.send_command("get_state")
@@ -239,6 +276,14 @@ class Controller(wx.App):
         command = f"{target} mode {e_obj.GetItemLabel(e_obj.GetSelection()).lower()}"
         print(command)
         resp = self.send_command(command)
+
+    def on_connection_fail(self):
+        self.update_timer.Stop()
+        self.connected = False
+        self.control_panel.Disable()
+        self.host_box.Enable()
+        self.port_box.Enable()
+        self.connect_button.Enable()
 
 
 
