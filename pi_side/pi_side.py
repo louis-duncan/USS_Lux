@@ -23,6 +23,8 @@ if DEBUG_DISPLAY:
     from RPi_GPIO_i2c_LCD import lcd
     LCD_ADDR = 0x27
     DISPLAY = lcd.HD44780(LCD_ADDR)
+    DISPLAY.backlight("on")
+    DISPLAY.clear()
 
 RUN = True
 
@@ -347,6 +349,8 @@ class ShipController:
 
     def stop(self):
         sleep(1)
+        DISPLAY.clear()
+        DISPLAY.backlight("off")
         exit(0)
 
     def get_state(self):
