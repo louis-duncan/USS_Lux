@@ -1,0 +1,1 @@
+screen -S lux -d -m python3 pi_side.py
