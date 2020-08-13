@@ -349,8 +349,9 @@ class ShipController:
 
     def stop(self):
         sleep(1)
-        DISPLAY.clear()
-        DISPLAY.backlight("off")
+        if DEBUG_DISPLAY:
+            DISPLAY.clear()
+            DISPLAY.backlight("off")
         exit(0)
 
     def get_state(self):
