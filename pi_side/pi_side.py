@@ -5,8 +5,19 @@ from gpiozero import LED, PWMLED
 from time import sleep
 from random import randint
 from threading import Thread
+import argparse
 
-DEBUG_DISPLAY = True
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "-d",
+    "--debug_display",
+    help="Enables a debug display on a 20x4 LCD display on the I2C bus.\n"
+         "This will take over control of pins 3 & 5 (GPIO 2 & 3).",
+    action="store_true"
+)
+args = parser.parse_args()
+
+DEBUG_DISPLAY = args.debug_display
 
 if DEBUG_DISPLAY:
     from RPi_GPIO_i2c_LCD import lcd
